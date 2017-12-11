@@ -82,14 +82,20 @@
     NSMutableArray    *dataMSet = [NSMutableArray array];
     
     NSDirectoryEnumerator *direnum = [manager enumeratorAtPath:home];
-    NSMutableArray *files = [NSMutableArray arrayWithCapacity:42];
+    NSMutableArray *files = [NSMutableArray array];
+    NSMutableArray *localizableFiles = [NSMutableArray array];
     
     NSString *filename ;
-    NSArray *extension = @[@"m", @"h"];
+    NSArray *extension = @[@"m", @"h", @"swift"];
     while (filename = [direnum nextObject]) {
         for (NSString *ext in extension) {
             if ([[filename pathExtension] isEqualToString:ext]) {
                 [files addObject: filename];
+                continue;
+            }
+            if ([[filename pathExtension] isEqualToString:@"strings"]) {
+                [localizableFiles addObject:filename];
+                continue;
             }
         }
     }
@@ -102,7 +108,15 @@
         
         NSString *str=[NSString stringWithContentsOfFile:[NSString stringWithFormat:@"%@/%@", home, filename] encoding:NSUTF8StringEncoding error:nil];
         
-        NSRegularExpression *regular = [NSRegularExpression regularExpressionWithPattern:@"@\"[^\"]*[\\u4E00-\\u9FA5]+[^\"\\n]*?\"" options:NSRegularExpressionCaseInsensitive error:nil];
+        BOOL isSwift = [[[filename componentsSeparatedByString:@"/"] lastObject] hasSuffix:@"swift"];
+        
+        NSError *error = nil;
+        
+        NSRegularExpression *regular = [NSRegularExpression regularExpressionWithPattern:@"@\"+[^\"]*[\\u4E00-\\u9FA5]+[^\"\\n]*?\"" options:NSRegularExpressionCaseInsensitive error:&error];
+        NSLog(@" ---- error = %@", error);
+        if (isSwift) {
+            regular = [NSRegularExpression regularExpressionWithPattern:@"\"+[^\"]*[\\u4E00-\\u9FA5]+[^\"\\n]*?\"" options:NSRegularExpressionCaseInsensitive error:nil];
+        }
         
         NSArray *matches = [regular matchesInString:str
                                             options:0
@@ -118,8 +132,10 @@
             }
             NSRange range = [match range];
             NSString *mStr = [str substringWithRange:range];
-            NSRange isOnlyAt = NSMakeRange(0, 1);
-            mStr = [mStr stringByReplacingCharactersInRange:isOnlyAt withString:@""];
+            if (!isSwift) {
+                NSRange isOnlyAt = NSMakeRange(0, 1);
+                mStr = [mStr stringByReplacingCharactersInRange:isOnlyAt withString:@""];
+            }
             isHasFileName = YES;
             
             if (self.deleteInOneFile.state) {
@@ -134,8 +150,46 @@
                     continue;
                 }
             }
-            chineseCount++;
-            [dataMSet addObject:mStr];
+            BOOL canAddStr = true;
+            NSEnumerator *locFileenum;
+            NSString *locFilename;
+            locFileenum = [localizableFiles objectEnumerator];
+            while (locFilename = [locFileenum nextObject]) {
+                NSString *locStr=[NSString stringWithContentsOfFile:[NSString stringWithFormat:@"%@/%@", home, locFilename] encoding:NSUTF8StringEncoding error:nil];
+                NSRegularExpression *locRegular = [NSRegularExpression regularExpressionWithPattern:@"\"+[^\"]+[^\"\\n]*?\" =" options:NSRegularExpressionCaseInsensitive error:nil];
+                NSArray *locMatches = [locRegular matchesInString:locStr
+                                                          options:0
+                                                            range:NSMakeRange(0, locStr.length)];
+                [self showTxt:[NSMutableString stringWithFormat:@"%@", locMatches]];
+                for (NSTextCheckingResult *locMatch in locMatches) {
+                    NSString *locsubStr = [locStr substringWithRange:locMatch.range];
+                    if ([[locsubStr stringByReplacingOccurrencesOfString:@" =" withString:@""] isEqualToString:mStr]) {
+                        canAddStr = false;
+                    }
+                }
+            }
+            
+            if (canAddStr) {
+                while (locFilename = [locFileenum nextObject]) {
+                    NSString *locStr=[NSString stringWithContentsOfFile:[NSString stringWithFormat:@"%@/%@", home, locFilename] encoding:NSUTF8StringEncoding error:nil];
+                    NSRegularExpression *locRegular = [NSRegularExpression regularExpressionWithPattern:@"\"+[^\"]+[^\"\\n]*?\";" options:NSRegularExpressionCaseInsensitive error:nil];
+                    NSArray *locMatches = [locRegular matchesInString:locStr
+                                                              options:0
+                                                                range:NSMakeRange(0, locStr.length)];
+                    [self showTxt:[NSMutableString stringWithFormat:@"%@", locMatches]];
+                    for (NSTextCheckingResult *locMatch in locMatches) {
+                        NSString *locsubStr = [locStr substringWithRange:locMatch.range];
+                        if ([[locsubStr stringByReplacingOccurrencesOfString:@";" withString:@""] isEqualToString:mStr]) {
+                            canAddStr = false;
+                        }
+                    }
+                }
+            }
+            
+            if (canAddStr) {
+                chineseCount++;
+                [dataMSet addObject:mStr];
+            }
             isHasChineseInFile = YES;
         }
         if (!isHasChineseInFile) {
@@ -149,7 +203,7 @@
             [dataMstr appendString:@"\n"];
             continue;
         }
-        [dataMstr appendString:[[txt stringByAppendingString:@"="] stringByAppendingString:                self.tradition.state ? [[ASConvertor getInstance] s2t:txt] : txt]];
+        [dataMstr appendString:[[txt stringByAppendingString:@" = "] stringByAppendingString:                self.tradition.state ? [[ASConvertor getInstance] s2t:txt] : txt]];
         [dataMstr appendString:@";"];
         [dataMstr appendString:@"\n"];
     }
